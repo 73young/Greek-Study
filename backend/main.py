@@ -12,7 +12,7 @@ DB_PATH = os.environ.get("DB_PATH", "/workspace/data/app.db")
 DIST_PATH = Path(os.environ.get("DIST_PATH", "/workspace/dist"))
 COOKIE_NAME = "greek_learner"
 ADMIN_COOKIE_NAME = "greek_admin"
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip() or "466801"
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -74,6 +74,10 @@ def init_db():
                 (lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες.", "오히려 하나님의 말씀을 듣고 지키는 사람들이 복이 있다.", "ἀκούοντες: 듣는 사람들 · λόγον: 말씀을", "누가복음 11:28 · SBLGNT", "2026-09-28"),
                 (lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος.", "태초에 말씀이 계셨다.", "ἐν ἀρχῇ: 태초에 · λόγος: 말씀", "요한복음 1:1 앞부분 · SBLGNT", "2026-09-28"),
             ],
+        )
+        conn.execute(
+            "DELETE FROM sentence_tests WHERE lesson_id = ? AND source_reference = ''",
+            (lesson["id"],),
         )
         old_sentence = conn.execute(
             "SELECT id FROM sentence_tests WHERE lesson_id = ? AND greek_text = ?",
