@@ -27,4 +27,5 @@ export type SentenceTest = {
   hint: string
   source_reference?: string
   source_checked_at?: string
+  source_url?: string
 }

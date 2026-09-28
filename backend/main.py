@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import os
 import sqlite3
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,8 @@ DIST_PATH = Path(os.environ.get("DIST_PATH", "/workspace/dist"))
 COOKIE_NAME = "greek_learner"
 ADMIN_COOKIE_NAME = "greek_admin"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip() or "466801"
+def normalize_text(value: str) -> str:
+    return unicodedata.normalize("NFC", value).replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "").replace("\u00a0", " ").strip()
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -50,6 +53,7 @@ def init_db():
         """)
         conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_reference TEXT NOT NULL DEFAULT ''") if "source_reference" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
         conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_checked_at TEXT NOT NULL DEFAULT ''") if "source_checked_at" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
+        conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_url TEXT NOT NULL DEFAULT ''") if "source_url" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
         for lesson_name in ["1과", "2과", "3과"]:
             conn.execute("INSERT OR IGNORE INTO lessons (name) VALUES (?)", (lesson_name,))
         lesson = conn.execute("SELECT id FROM lessons WHERE name = '1과'").fetchone()
@@ -69,11 +73,19 @@ def init_db():
             if word:
                 conn.execute("INSERT OR IGNORE INTO word_forms (word_id, form_text, grammar_label, gloss) VALUES (?, ?, ?, ?)", (word["id"], form_text, grammar_label, gloss))
         conn.executemany(
-            "INSERT OR IGNORE INTO sentence_tests (lesson_id, greek_text, korean_answer, hint, source_reference, source_checked_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO sentence_tests (lesson_id, greek_text, korean_answer, hint, source_reference, source_checked_at, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες.", "오히려 하나님의 말씀을 듣고 지키는 사람들이 복이 있다.", "ἀκούοντες: 듣는 사람들 · λόγον: 말씀을", "누가복음 11:28 · SBLGNT", "2026-09-28"),
-                (lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος.", "태초에 말씀이 계셨다.", "ἐν ἀρχῇ: 태초에 · λόγος: 말씀", "요한복음 1:1 앞부분 · SBLGNT", "2026-09-28"),
+                (lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες.", "오히려 하나님의 말씀을 듣고 지키는 사람들이 복이 있다.", "ἀκούοντες: 듣는 사람들 · λόγον: 말씀을", "누가복음 11:28 · SBLGNT", "2026-09-28", "https://www.biblegateway.com/passage/?search=%CE%9A%CE%91%CE%A4%CE%91+%CE%9B%CE%9F%CE%A5%CE%9A%CE%91%CE%9D+11%3A28-30&version=SBLGNT"),
+                (lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος.", "태초에 말씀이 계셨다.", "ἐν ἀρχῇ: 태초에 · λόγος: 말씀", "요한복음 1:1 앞부분 · SBLGNT", "2026-09-28", "https://www.biblegateway.com/passage/?search=john+1%3A1&version=SBLGNT"),
             ],
+        )
+        conn.execute(
+            "UPDATE sentence_tests SET source_url = ? WHERE lesson_id = ? AND greek_text = ?",
+            ("https://www.biblegateway.com/passage/?search=%CE%9A%CE%91%CE%A4%CE%91+%CE%9B%CE%9F%CE%A5%CE%9A%CE%91%CE%9D+11%3A28-30&version=SBLGNT", lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες."),
+        )
+        conn.execute(
+            "UPDATE sentence_tests SET source_url = ? WHERE lesson_id = ? AND greek_text = ?",
+            ("https://www.biblegateway.com/passage/?search=john+1%3A1&version=SBLGNT", lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος."),
         )
         conn.execute(
             "DELETE FROM sentence_tests WHERE lesson_id = ? AND source_reference = ''",
@@ -105,6 +117,11 @@ class BatchWords(BaseModel):
     words: list[WordInput]
 class LessonInput(BaseModel):
     name: str
+class WordUpdateInput(BaseModel):
+    greek: str
+    pronunciation: str
+    part_of_speech: str
+    meaning: str
 class StateInput(BaseModel):
     key: str
     value: str
@@ -173,12 +190,45 @@ def create_lesson(payload: LessonInput, request: Request):
             raise HTTPException(400, "같은 이름의 과가 이미 있어요.")
         lesson = conn.execute("SELECT id, name, 0 AS word_count FROM lessons WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return dict(lesson)
+@app.put("/api/admin/lessons/{lesson_id}")
+def update_lesson(lesson_id: int, payload: LessonInput, request: Request):
+    require_admin(request)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "과 이름을 입력해 주세요.")
+    if len(name) > 40:
+        raise HTTPException(400, "과 이름은 40자 이내로 입력해 주세요.")
+    with get_db() as conn:
+        if not conn.execute("SELECT id FROM lessons WHERE id = ?", (lesson_id,)).fetchone():
+            raise HTTPException(404, "과를 찾을 수 없습니다.")
+        try:
+            conn.execute("UPDATE lessons SET name = ? WHERE id = ?", (name, lesson_id))
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "같은 이름의 과가 이미 있어요.")
+        lesson = conn.execute("SELECT l.id, l.name, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON w.lesson_id = l.id WHERE l.id = ? GROUP BY l.id", (lesson_id,)).fetchone()
+    return dict(lesson)
 @app.get("/api/admin/lessons/{lesson_id}/words")
 def admin_words(lesson_id: int, request: Request):
     require_admin(request)
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM words WHERE lesson_id = ? ORDER BY id", (lesson_id,)).fetchall()
     return [dict(row) for row in rows]
+@app.put("/api/admin/words/{word_id}")
+def update_word(word_id: int, payload: WordUpdateInput, request: Request):
+    require_admin(request)
+    values = [normalize_text(payload.greek), normalize_text(payload.pronunciation), normalize_text(payload.part_of_speech), normalize_text(payload.meaning)]
+    if not all(values):
+        raise HTTPException(400, "헬라어, 발음, 품사, 뜻을 모두 입력해 주세요.")
+    with get_db() as conn:
+        existing = conn.execute("SELECT lesson_id FROM words WHERE id = ?", (word_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "단어를 찾을 수 없습니다.")
+        try:
+            conn.execute("UPDATE words SET greek = ?, pronunciation = ?, part_of_speech = ?, meaning = ? WHERE id = ?", (*values, word_id))
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "이 과에 같은 헬라어 표기의 단어가 이미 있어요.")
+        word = conn.execute("SELECT * FROM words WHERE id = ?", (word_id,)).fetchone()
+    return dict(word)
 @app.delete("/api/admin/words/{word_id}")
 def delete_word(word_id: int, request: Request):
     require_admin(request)
@@ -217,7 +267,7 @@ def add_words(lesson_id: int, payload: BatchWords, request: Request):
             raise HTTPException(404, "과를 찾을 수 없습니다.")
         added = 0
         for word in payload.words:
-            values = [word.greek.strip(), word.pronunciation.strip(), word.part_of_speech.strip(), word.meaning.strip()]
+            values = [normalize_text(word.greek), normalize_text(word.pronunciation), normalize_text(word.part_of_speech), normalize_text(word.meaning)]
             if not all(values):
                 raise HTTPException(400, "헬라어, 발음, 품사, 뜻을 모두 입력해 주세요.")
             added += conn.execute("INSERT OR IGNORE INTO words (lesson_id, greek, pronunciation, part_of_speech, meaning) VALUES (?, ?, ?, ?, ?)", (lesson_id, *values)).rowcount

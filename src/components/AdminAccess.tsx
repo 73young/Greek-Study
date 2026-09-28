@@ -24,7 +24,7 @@ export default function AdminAccess({ onStatusChange, onOpenManager }: Props) {
       const response = await api('admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.detail || '로그인하지 못했어요.')
-      setPassword(''); setMessage('관리자 편집 권한이 열렸어요.'); await loadStatus()
+      setPassword(''); setMessage('관리자 편집 권한이 열렸어요.'); await loadStatus(); onOpenManager()
     } catch (error) { setMessage(error instanceof Error ? error.message : '로그인하지 못했어요.') }
   }
   const logout = async () => {
