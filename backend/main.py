@@ -4,6 +4,7 @@ import os
 import sqlite3
 import unicodedata
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -21,7 +22,25 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+def backup_existing_db():
+    if not os.path.exists(DB_PATH):
+        return
+    backup_dir = os.path.join(os.path.dirname(DB_PATH) or ".", "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = os.path.join(backup_dir, f"app-before-update-{stamp}.db")
+    source = sqlite3.connect(DB_PATH)
+    target = sqlite3.connect(backup_path)
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    backups = sorted(Path(backup_dir).glob("app-before-update-*.db"), key=lambda item: item.stat().st_mtime, reverse=True)
+    for old_backup in backups[10:]:
+        old_backup.unlink(missing_ok=True)
 def init_db():
+    backup_existing_db()
     with get_db() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS lessons (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
