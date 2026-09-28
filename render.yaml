@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: greek-study-notebook
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: greek-study-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /data/app.db
+      - key: DIST_PATH
+        value: /app/dist
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ADMIN_PASSWORD
+        value: "466801"
