@@ -51,6 +51,8 @@ def init_db():
           updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(learner_id, state_key), FOREIGN KEY(learner_id) REFERENCES learners(id)
         );
         """)
+        conn.execute("ALTER TABLE lessons ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0") if "sort_order" not in [row[1] for row in conn.execute("PRAGMA table_info(lessons)").fetchall()] else None
+        conn.execute("UPDATE lessons SET sort_order = id WHERE sort_order = 0")
         conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_reference TEXT NOT NULL DEFAULT ''") if "source_reference" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
         conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_checked_at TEXT NOT NULL DEFAULT ''") if "source_checked_at" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
         conn.execute("ALTER TABLE sentence_tests ADD COLUMN source_url TEXT NOT NULL DEFAULT ''") if "source_url" not in [row[1] for row in conn.execute("PRAGMA table_info(sentence_tests)").fetchall()] else None
@@ -122,6 +124,13 @@ class WordUpdateInput(BaseModel):
     pronunciation: str
     part_of_speech: str
     meaning: str
+class FormInput(BaseModel):
+    word_id: int
+    form_text: str
+    grammar_label: str
+    gloss: str = ""
+class LessonOrderInput(BaseModel):
+    lesson_ids: list[int]
 class StateInput(BaseModel):
     key: str
     value: str
@@ -173,7 +182,7 @@ def admin_overview(request: Request):
         word_count = conn.execute("SELECT COUNT(*) FROM words").fetchone()[0]
         form_count = conn.execute("SELECT COUNT(*) FROM word_forms").fetchone()[0]
         sentence_count = conn.execute("SELECT COUNT(*) FROM sentence_tests").fetchone()[0]
-        lessons = conn.execute("SELECT l.id, l.name, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON w.lesson_id = l.id GROUP BY l.id ORDER BY l.id").fetchall()
+        lessons = conn.execute("SELECT l.id, l.name, l.sort_order, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON w.lesson_id = l.id GROUP BY l.id ORDER BY l.sort_order, l.id").fetchall()
     return {"learners": learner_count, "words": word_count, "forms": form_count, "sentences": sentence_count, "lessons": [dict(row) for row in lessons]}
 @app.post("/api/admin/lessons")
 def create_lesson(payload: LessonInput, request: Request):
@@ -184,12 +193,25 @@ def create_lesson(payload: LessonInput, request: Request):
     if len(name) > 40:
         raise HTTPException(400, "과 이름은 40자 이내로 입력해 주세요.")
     with get_db() as conn:
+        next_order = conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM lessons").fetchone()[0]
         try:
-            cursor = conn.execute("INSERT INTO lessons (name) VALUES (?)", (name,))
+            cursor = conn.execute("INSERT INTO lessons (name, sort_order) VALUES (?, ?)", (name, next_order))
         except sqlite3.IntegrityError:
             raise HTTPException(400, "같은 이름의 과가 이미 있어요.")
-        lesson = conn.execute("SELECT id, name, 0 AS word_count FROM lessons WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        lesson = conn.execute("SELECT id, name, sort_order, 0 AS word_count FROM lessons WHERE id = ?", (cursor.lastrowid,)).fetchone()
     return dict(lesson)
+@app.put("/api/admin/lessons/order")
+def update_lesson_order(payload: LessonOrderInput, request: Request):
+    require_admin(request)
+    if len(payload.lesson_ids) != len(set(payload.lesson_ids)):
+        raise HTTPException(400, "과 순서에 중복된 항목이 있어요.")
+    with get_db() as conn:
+        existing_ids = [row[0] for row in conn.execute("SELECT id FROM lessons ORDER BY sort_order, id").fetchall()]
+        if set(payload.lesson_ids) != set(existing_ids):
+            raise HTTPException(400, "현재 과 목록과 순서 정보가 일치하지 않아요. 새로고침 후 다시 시도해 주세요.")
+        for order, lesson_id in enumerate(payload.lesson_ids, start=1):
+            conn.execute("UPDATE lessons SET sort_order = ? WHERE id = ?", (order, lesson_id))
+    return {"ok": True}
 @app.put("/api/admin/lessons/{lesson_id}")
 def update_lesson(lesson_id: int, payload: LessonInput, request: Request):
     require_admin(request)
@@ -207,6 +229,30 @@ def update_lesson(lesson_id: int, payload: LessonInput, request: Request):
             raise HTTPException(400, "같은 이름의 과가 이미 있어요.")
         lesson = conn.execute("SELECT l.id, l.name, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON w.lesson_id = l.id WHERE l.id = ? GROUP BY l.id", (lesson_id,)).fetchone()
     return dict(lesson)
+@app.post("/api/admin/forms")
+def create_form(payload: FormInput, request: Request):
+    require_admin(request)
+    values = [normalize_text(payload.form_text), normalize_text(payload.grammar_label), normalize_text(payload.gloss)]
+    if not values[0] or not values[1]:
+        raise HTTPException(400, "변화형 표기와 문법 정보를 입력해 주세요.")
+    with get_db() as conn:
+        word = conn.execute("SELECT id, lesson_id FROM words WHERE id = ?", (payload.word_id,)).fetchone()
+        if not word:
+            raise HTTPException(404, "기본 단어를 찾을 수 없습니다.")
+        try:
+            cursor = conn.execute("INSERT INTO word_forms (word_id, form_text, grammar_label, gloss) VALUES (?, ?, ?, ?)", (payload.word_id, *values))
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "같은 변화형이 이미 등록되어 있어요.")
+        form = conn.execute("SELECT f.*, w.greek, w.pronunciation, w.part_of_speech, w.meaning FROM word_forms f JOIN words w ON w.id = f.word_id WHERE f.id = ?", (cursor.lastrowid,)).fetchone()
+    return dict(form)
+@app.delete("/api/admin/forms/{form_id}")
+def delete_form(form_id: int, request: Request):
+    require_admin(request)
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM word_forms WHERE id = ?", (form_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(404, "변화형을 찾을 수 없습니다.")
+    return {"ok": True}
 @app.get("/api/admin/lessons/{lesson_id}/words")
 def admin_words(lesson_id: int, request: Request):
     require_admin(request)
@@ -240,7 +286,7 @@ def delete_word(word_id: int, request: Request):
 @app.get("/api/lessons")
 def lessons():
     with get_db() as conn:
-        rows = conn.execute("SELECT l.id, l.name, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON l.id = w.lesson_id GROUP BY l.id ORDER BY l.id").fetchall()
+        rows = conn.execute("SELECT l.id, l.name, l.sort_order, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON l.id = w.lesson_id GROUP BY l.id ORDER BY l.sort_order, l.id").fetchall()
     return [dict(row) for row in rows]
 @app.get("/api/lessons/{lesson_id}/forms")
 def get_forms(lesson_id: int):

@@ -6,7 +6,7 @@ export type Word = {
   part_of_speech: string
   meaning: string
 }
-export type Lesson = { id: number; name: string; word_count: number }
+export type Lesson = { id: number; name: string; word_count: number; sort_order?: number }
 export type Tab = 'cards' | 'forms' | 'quiz' | 'tests' | 'wrong'
 export type WordForm = {
   id: number
