@@ -103,6 +103,8 @@ class WordInput(BaseModel):
     meaning: str
 class BatchWords(BaseModel):
     words: list[WordInput]
+class LessonInput(BaseModel):
+    name: str
 class StateInput(BaseModel):
     key: str
     value: str
@@ -156,6 +158,21 @@ def admin_overview(request: Request):
         sentence_count = conn.execute("SELECT COUNT(*) FROM sentence_tests").fetchone()[0]
         lessons = conn.execute("SELECT l.id, l.name, COUNT(w.id) AS word_count FROM lessons l LEFT JOIN words w ON w.lesson_id = l.id GROUP BY l.id ORDER BY l.id").fetchall()
     return {"learners": learner_count, "words": word_count, "forms": form_count, "sentences": sentence_count, "lessons": [dict(row) for row in lessons]}
+@app.post("/api/admin/lessons")
+def create_lesson(payload: LessonInput, request: Request):
+    require_admin(request)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "과 이름을 입력해 주세요.")
+    if len(name) > 40:
+        raise HTTPException(400, "과 이름은 40자 이내로 입력해 주세요.")
+    with get_db() as conn:
+        try:
+            cursor = conn.execute("INSERT INTO lessons (name) VALUES (?)", (name,))
+        except sqlite3.IntegrityError:
+            raise HTTPException(400, "같은 이름의 과가 이미 있어요.")
+        lesson = conn.execute("SELECT id, name, 0 AS word_count FROM lessons WHERE id = ?", (cursor.lastrowid,)).fetchone()
+    return dict(lesson)
 @app.get("/api/admin/lessons/{lesson_id}/words")
 def admin_words(lesson_id: int, request: Request):
     require_admin(request)
