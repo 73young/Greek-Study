@@ -96,17 +96,17 @@ def init_db():
         conn.executemany(
             "INSERT OR IGNORE INTO sentence_tests (lesson_id, greek_text, korean_answer, hint, source_reference, source_checked_at, source_url) VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες.", "오히려 하나님의 말씀을 듣고 지키는 사람들이 복이 있다.", "ἀκούοντες: 듣는 사람들 · λόγον: 말씀을", "누가복음 11:28 · SBLGNT", "2026-09-28", "https://www.biblegateway.com/passage/?search=%CE%9A%CE%91%CE%A4%CE%91+%CE%9B%CE%9F%CE%A5%CE%9A%CE%91%CE%9D+11%3A28-30&version=SBLGNT"),
-                (lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος.", "태초에 말씀이 계셨다.", "ἐν ἀρχῇ: 태초에 · λόγος: 말씀", "요한복음 1:1 앞부분 · SBLGNT", "2026-09-28", "https://www.biblegateway.com/passage/?search=john+1%3A1&version=SBLGNT"),
+                (lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες.", "오히려 하나님의 말씀을 듣고 지키는 사람들이 복이 있다.", "ἀκούοντες: 듣는 사람들 · λόγον: 말씀을", "누가복음 11:28 · SBLGNT · 비평 기호 제외 학습 표기", "2026-09-28", "https://github.com/Faithlife/SBLGNT/blob/master/data/sblgnt/text/Luke.txt"),
+                (lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος.", "태초에 말씀이 계셨다.", "ἐν ἀρχῇ: 태초에 · λόγος: 말씀", "요한복음 1:1 앞부분 · SBLGNT · 비평 기호 제외 학습 표기", "2026-09-28", "https://github.com/Faithlife/SBLGNT/blob/master/data/sblgnt/text/John.txt"),
             ],
         )
         conn.execute(
-            "UPDATE sentence_tests SET source_url = ? WHERE lesson_id = ? AND greek_text = ?",
-            ("https://www.biblegateway.com/passage/?search=%CE%9A%CE%91%CE%A4%CE%91+%CE%9B%CE%9F%CE%A5%CE%9A%CE%91%CE%9D+11%3A28-30&version=SBLGNT", lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες."),
+            "UPDATE sentence_tests SET source_reference = ?, source_checked_at = ?, source_url = ? WHERE lesson_id = ? AND greek_text = ?",
+            ("누가복음 11:28 · SBLGNT · 비평 기호 제외 학습 표기", "2026-09-28", "https://github.com/Faithlife/SBLGNT/blob/master/data/sblgnt/text/Luke.txt", lesson["id"], "αὐτὸς δὲ εἶπεν· Μενοῦν μακάριοι οἱ ἀκούοντες τὸν λόγον τοῦ θεοῦ καὶ φυλάσσοντες."),
         )
         conn.execute(
-            "UPDATE sentence_tests SET source_url = ? WHERE lesson_id = ? AND greek_text = ?",
-            ("https://www.biblegateway.com/passage/?search=john+1%3A1&version=SBLGNT", lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος."),
+            "UPDATE sentence_tests SET source_reference = ?, source_checked_at = ?, source_url = ? WHERE lesson_id = ? AND greek_text = ?",
+            ("요한복음 1:1 앞부분 · SBLGNT · 비평 기호 제외 학습 표기", "2026-09-28", "https://github.com/Faithlife/SBLGNT/blob/master/data/sblgnt/text/John.txt", lesson["id"], "Ἐν ἀρχῇ ἦν ὁ λόγος."),
         )
         conn.execute(
             "DELETE FROM sentence_tests WHERE lesson_id = ? AND source_reference = ''",
